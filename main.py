@@ -110,7 +110,6 @@ class BaseDialogContent(MDBoxLayout):
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
         if keycode in (13, 271):  # Enter or Numpad Enter
-            # Si une action OK est définie, on l'exécute
             if self.ok_action:
                 self.ok_action()
                 return True
@@ -372,9 +371,18 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def add_product_action(self, content):
-        ajouter_produit(content.nom_field.text, content.desc_field.text, float(content.prix_field.text), int(content.stock_field.text))
-        self.update_product_list()
-        self.dialog.dismiss()
+        # CORRECTION: Ajout de la validation
+        if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
+            toast("Nom, prix et stock sont requis.")
+            return
+        try:
+            prix = float(content.prix_field.text)
+            stock = int(content.stock_field.text)
+            ajouter_produit(content.nom_field.text, content.desc_field.text, prix, stock)
+            self.update_product_list()
+            self.dialog.dismiss()
+        except ValueError:
+            toast("Veuillez entrer un nombre valide pour le prix et le stock.")
 
     def show_product_choice_dialog(self, produit, *args):
         self.selected_item = produit
@@ -410,12 +418,21 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def edit_product_action(self, content):
-        modifier_produit(
-            self.selected_item['id'], content.nom_field.text, content.desc_field.text,
-            float(content.prix_field.text), int(content.stock_field.text)
-        )
-        self.update_product_list()
-        self.dialog.dismiss()
+        # CORRECTION: Ajout de la validation
+        if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
+            toast("Nom, prix et stock sont requis.")
+            return
+        try:
+            prix = float(content.prix_field.text)
+            stock = int(content.stock_field.text)
+            modifier_produit(
+                self.selected_item['id'], content.nom_field.text, content.desc_field.text,
+                prix, stock
+            )
+            self.update_product_list()
+            self.dialog.dismiss()
+        except ValueError:
+            toast("Veuillez entrer un nombre valide pour le prix et le stock.")
 
     def show_delete_product_dialog(self, *args):
         self.dialog.dismiss()
@@ -449,6 +466,10 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def add_client_action(self, content):
+        # CORRECTION: Ajout de la validation
+        if not content.nom_field.text:
+            toast("Le nom du client est requis.")
+            return
         db_ajouter_client(content.nom_field.text, content.contact_field.text)
         self.update_client_list()
         self.dialog.dismiss()
@@ -485,6 +506,10 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def edit_client_action(self, content):
+        # CORRECTION: Ajout de la validation
+        if not content.nom_field.text:
+            toast("Le nom du client est requis.")
+            return
         modifier_client(self.selected_item['id'], content.nom_field.text, content.contact_field.text)
         self.update_client_list()
         self.dialog.dismiss()
@@ -522,7 +547,7 @@ class MainApp(MDApp):
             self.update_product_list()
             self.dialog.dismiss()
         except ValueError:
-            print("Erreur: Le taux doit être un nombre.")
+            toast("Le taux doit être un nombre.")
 
 if __name__ == '__main__':
     MainApp().run()
