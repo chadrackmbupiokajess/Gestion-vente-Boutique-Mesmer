@@ -1,0 +1,137 @@
+#:kivy 2.1.0
+#:import get_color_from_hex kivy.utils.get_color_from_hex
+
+MDScreenManager:
+    id: screen_manager
+
+    MDScreen:
+        name: 'main_screen'
+        # ... (L'écran principal avec les onglets ne change pas) ...
+        MDBottomNavigation:
+            panel_color: get_color_from_hex("#F7F7F7")
+            selected_color_background: get_color_from_hex("#E7E7E7")
+            text_color_active: 1, 0, 0, 1
+
+            MDBottomNavigationItem:
+                name: 'products_screen'
+                text: 'Produits'
+                icon: 'package-variant'
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    MDTopAppBar:
+                        title: "Gestion des Produits"
+                        elevation: 4
+                        right_action_items: [["currency-usd", lambda x: app.show_rate_dialog()]]
+                    MDBoxLayout:
+                        size_hint_y: None
+                        height: "48dp"
+                        padding: "10dp"
+                        MDTextField:
+                            id: search_field
+                            hint_text: "Rechercher un produit..."
+                            icon_left: "magnify"
+                            on_text: app.search_products()
+                    MDScrollView:
+                        MDList:
+                            id: product_list
+                MDFloatingActionButton:
+                    icon: "plus"
+                    pos_hint: {"center_x": 0.5, "center_y": 0.15}
+                    on_release: app.show_add_product_dialog()
+
+            MDBottomNavigationItem:
+                name: 'clients_screen'
+                text: 'Clients'
+                icon: 'account-group'
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    MDTopAppBar:
+                        title: "Gestion des Clients"
+                        elevation: 4
+                    MDScrollView:
+                        MDList:
+                            id: client_list
+                MDFloatingActionButton:
+                    icon: "plus"
+                    pos_hint: {"center_x": 0.5, "center_y": 0.15}
+                    on_release: app.show_add_client_dialog()
+
+            MDBottomNavigationItem:
+                name: 'sales_screen'
+                text: 'Ventes'
+                icon: 'point-of-sale'
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    MDTopAppBar:
+                        title: "Historique des Ventes"
+                        elevation: 4
+                    MDScrollView:
+                        MDList:
+                            id: sales_list
+                MDFloatingActionButton:
+                    icon: "plus"
+                    pos_hint: {"center_x": 0.5, "center_y": 0.15}
+                    on_release: app.go_to_new_sale_screen()
+
+    MDScreen:
+        name: 'new_sale_screen'
+        # on_enter et on_leave ne sont plus nécessaires ici
+        MDBoxLayout:
+            orientation: 'vertical'
+            MDTopAppBar:
+                title: "Nouvelle Vente"
+                elevation: 4
+                left_action_items: [["arrow-left", lambda x: app.go_to_main_screen()]]
+            
+            MDBoxLayout:
+                orientation: 'horizontal'
+                padding: "10dp"
+                spacing: "10dp"
+
+                # --- Panneau de Gauche (Contrôles) ---
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    size_hint_x: 0.4
+                    spacing: "10dp"
+
+                    MDTextField:
+                        id: sale_search_field
+                        hint_text: "Rechercher un produit..."
+                        mode: "rectangle"
+                        on_text: app.search_products_for_sale()
+                        on_text_validate: app.select_first_product_from_search() # Ajout de cette ligne
+
+                    MDScrollView:
+                        MDList:
+                            id: search_results_list
+
+                # --- Panneau de Droite (Panier) ---
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    size_hint_x: 0.6
+                    
+                    MDLabel:
+                        text: "Panier"
+                        halign: "center"
+                        font_style: "H6"
+                        size_hint_y: None
+                        height: self.texture_size[1]
+                        padding_y: "10dp"
+
+                    MDScrollView:
+                        MDList:
+                            id: cart_list
+                    
+                    MDBoxLayout:
+                        size_hint_y: None
+                        height: "60dp"
+                        padding: "10dp"
+                        
+                        MDLabel:
+                            id: total_label
+                            text: "Total: 0.00 Fc"
+                            font_style: "H6"
+                            
+                        MDRaisedButton:
+                            text: "Valider la Vente"
+                            on_release: app.validate_sale()
