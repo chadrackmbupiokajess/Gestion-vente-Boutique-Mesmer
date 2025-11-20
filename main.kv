@@ -75,7 +75,6 @@ MDScreenManager:
 
     MDScreen:
         name: 'new_sale_screen'
-        # on_enter et on_leave ne sont plus nécessaires ici
         MDBoxLayout:
             orientation: 'vertical'
             MDTopAppBar:
@@ -99,7 +98,7 @@ MDScreenManager:
                         hint_text: "Rechercher un produit..."
                         mode: "rectangle"
                         on_text: app.search_products_for_sale()
-                        on_text_validate: app.select_first_product_from_search() # Ajout de cette ligne
+                        on_text_validate: app.handle_sale_search_enter() # Nom de fonction mis à jour
 
                     MDScrollView:
                         MDList:

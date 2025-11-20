@@ -93,6 +93,7 @@ def enregistrer_vente(client_id, panier):
 # --- Classes de dialogue améliorées pour la navigation au clavier ---
 class BaseDialogContent(MDBoxLayout):
     def __init__(self, **kwargs):
+        self.ok_action = kwargs.pop('ok_action', None)
         super().__init__(**kwargs)
         self.orientation = "vertical"
         self.spacing = "12dp"
@@ -108,8 +109,14 @@ class BaseDialogContent(MDBoxLayout):
         Window.unbind(on_key_down=self._on_keyboard_down)
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+        if keycode in (13, 271):  # Enter or Numpad Enter
+            # Si une action OK est définie, on l'exécute
+            if self.ok_action:
+                self.ok_action()
+                return True
         if keycode == 43:  # Tab
             self.focus_next_field()
+            return True
 
     def focus_next_field(self):
         try:
@@ -130,6 +137,8 @@ class ProductDialogContent(BaseDialogContent):
         self.stock_field = MDTextField(hint_text="Quantité en stock", input_filter="int")
         self.fields = [self.nom_field, self.desc_field, self.prix_field, self.stock_field]
         for field in self.fields:
+            if self.ok_action:
+                field.on_text_validate = self.ok_action
             self.add_widget(field)
 
 class ClientDialogContent(BaseDialogContent):
@@ -139,6 +148,8 @@ class ClientDialogContent(BaseDialogContent):
         self.contact_field = MDTextField(hint_text="Contact (tél, email, ...)")
         self.fields = [self.nom_field, self.contact_field]
         for field in self.fields:
+            if self.ok_action:
+                field.on_text_validate = self.ok_action
             self.add_widget(field)
 
 class FinalizeSaleDialogContent(BaseDialogContent):
@@ -150,6 +161,8 @@ class FinalizeSaleDialogContent(BaseDialogContent):
         self.fields = [self.nom_field, self.contact_field]
         self.add_widget(self.total_label)
         for field in self.fields:
+            if self.ok_action:
+                field.on_text_validate = self.ok_action
             self.add_widget(field)
 
 # --- Application Principale ---
@@ -202,6 +215,13 @@ class MainApp(MDApp):
                 item.product_data = p
                 results_list.add_widget(item)
 
+    def handle_sale_search_enter(self):
+        search_field = self.root.ids.sale_search_field
+        if not search_field.text and self.panier:
+            self.validate_sale()
+        else:
+            self.select_first_product_from_search()
+
     def select_first_product_from_search(self):
         results_list = self.root.ids.search_results_list
         if not results_list.children:
@@ -252,7 +272,6 @@ class MainApp(MDApp):
             subtotal = p['prix_vente'] * q
             total += subtotal
             
-            # CORRECTION: Utilisation d'un MDBoxLayout pour contenir le label et le bouton
             line_item = MDBoxLayout(adaptive_height=True, spacing="10dp")
             label = OneLineListItem(text=f"{q} x {p['nom']} - {subtotal:,.2f} Fc")
             delete_button = MDIconButton(icon="trash-can", on_release=partial(self.remove_from_cart, item))
@@ -270,14 +289,19 @@ class MainApp(MDApp):
     def validate_sale(self):
         if not self.panier: return
         total = sum(item['produit']['prix_vente'] * item['quantite'] for item in self.panier)
-        content_cls = FinalizeSaleDialogContent(total=total)
+        
+        def ok_action():
+            self.finalize_and_save_sale(content_cls, print_ticket=False)
+            
+        content_cls = FinalizeSaleDialogContent(total=total, ok_action=ok_action)
+        
         self.dialog = MDDialog(
             title="Finaliser la Vente",
             type="custom",
             content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="OK", on_release=lambda x: self.finalize_and_save_sale(content_cls, print_ticket=False)),
+                MDFlatButton(text="OK", on_release=ok_action),
                 MDIconButton(icon="printer", on_release=lambda x: self.finalize_and_save_sale(content_cls, print_ticket=True)),
             ],
         )
@@ -333,12 +357,14 @@ class MainApp(MDApp):
             sales_list.add_widget(item)
             
     def show_add_product_dialog(self):
-        content_cls = ProductDialogContent()
+        def ok_action():
+            self.add_product_action(content_cls)
+        content_cls = ProductDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
             title="Ajouter un Produit", type="custom", content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="AJOUTER", on_release=lambda x: self.add_product_action(content_cls)),
+                MDFlatButton(text="AJOUTER", on_release=ok_action),
             ],
         )
         content_cls.on_open()
@@ -364,8 +390,9 @@ class MainApp(MDApp):
 
     def show_edit_product_dialog(self, *args):
         self.dialog.dismiss()
-        content_cls = ProductDialogContent()
-        self.selected_item = self.selected_item
+        def ok_action():
+            self.edit_product_action(content_cls)
+        content_cls = ProductDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
         content_cls.desc_field.text = self.selected_item['description']
         content_cls.prix_field.text = str(self.selected_item['prix_vente'])
@@ -375,7 +402,7 @@ class MainApp(MDApp):
             title="Modifier un Produit", type="custom", content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SAUVEGARDER", on_release=lambda x: self.edit_product_action(content_cls)),
+                MDFlatButton(text="SAUVEGARDER", on_release=ok_action),
             ],
         )
         content_cls.on_open()
@@ -407,12 +434,14 @@ class MainApp(MDApp):
         self.dialog.dismiss()
 
     def show_add_client_dialog(self):
-        content_cls = ClientDialogContent()
+        def ok_action():
+            self.add_client_action(content_cls)
+        content_cls = ClientDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
             title="Ajouter un Client", type="custom", content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="AJOUTER", on_release=lambda x: self.add_client_action(content_cls)),
+                MDFlatButton(text="AJOUTER", on_release=ok_action),
             ],
         )
         content_cls.on_open()
@@ -438,8 +467,9 @@ class MainApp(MDApp):
 
     def show_edit_client_dialog(self, *args):
         self.dialog.dismiss()
-        content_cls = ClientDialogContent()
-        self.selected_item = self.selected_item
+        def ok_action():
+            self.edit_client_action(content_cls)
+        content_cls = ClientDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
         content_cls.contact_field.text = self.selected_item['contact']
         
@@ -447,7 +477,7 @@ class MainApp(MDApp):
             title="Modifier un Client", type="custom", content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SAUVEGARDER", on_release=lambda x: self.edit_client_action(content_cls)),
+                MDFlatButton(text="SAUVEGARDER", on_release=ok_action),
             ],
         )
         content_cls.on_open()
@@ -465,14 +495,14 @@ class MainApp(MDApp):
             title=f"Supprimer {self.selected_item['nom']}?", text="Cette action est irréversible.",
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SUPPRIMER", on_release=self.delete_product_action),
+                MDFlatButton(text="SUPPRIMER", on_release=self.delete_client_action),
             ],
         )
         self.dialog.open()
 
-    def delete_client_action(self, *args):
-        supprimer_client(self.selected_item['id'])
-        self.update_client_list()
+    def delete_product_action(self, *args):
+        supprimer_produit(self.selected_item['id'])
+        self.update_product_list()
         self.dialog.dismiss()
 
     def show_rate_dialog(self):
