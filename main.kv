@@ -6,16 +6,18 @@ MDScreenManager:
 
     MDScreen:
         name: 'main_screen'
-        # ... (L'écran principal avec les onglets ne change pas) ...
         MDBottomNavigation:
+            id: bottom_nav # Ajout de l'ID ici
             panel_color: get_color_from_hex("#F7F7F7")
             selected_color_background: get_color_from_hex("#E7E7E7")
             text_color_active: 1, 0, 0, 1
+            on_switch_tabs: app.on_tab_switch()
 
             MDBottomNavigationItem:
                 name: 'products_screen'
                 text: 'Produits'
                 icon: 'package-variant'
+                # ... Contenu de l'onglet Produits ...
                 MDBoxLayout:
                     orientation: 'vertical'
                     MDTopAppBar:
@@ -43,6 +45,7 @@ MDScreenManager:
                 name: 'clients_screen'
                 text: 'Clients'
                 icon: 'account-group'
+                # ... Contenu de l'onglet Clients ...
                 MDBoxLayout:
                     orientation: 'vertical'
                     MDTopAppBar:
@@ -60,6 +63,7 @@ MDScreenManager:
                 name: 'sales_screen'
                 text: 'Ventes'
                 icon: 'point-of-sale'
+                # ... Contenu de l'onglet Ventes ...
                 MDBoxLayout:
                     orientation: 'vertical'
                     MDTopAppBar:
@@ -73,8 +77,40 @@ MDScreenManager:
                     pos_hint: {"center_x": 0.5, "center_y": 0.15}
                     on_release: app.go_to_new_sale_screen()
 
+            MDBottomNavigationItem:
+                name: 'reports_screen'
+                text: 'Rapports'
+                icon: 'chart-bar'
+                
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    MDTopAppBar:
+                        title: "Rapports et Statistiques"
+                        elevation: 4
+                    
+                    MDBoxLayout:
+                        orientation: 'vertical'
+                        padding: "20dp"
+                        spacing: "20dp"
+
+                        MDLabel:
+                            id: total_revenue_label
+                            text: "Chiffre d'affaires total : 0 Fc"
+                            halign: 'center'
+                            font_style: 'H5'
+                        
+                        MDLabel:
+                            text: "Produits les plus vendus"
+                            halign: 'center'
+                            font_style: 'H6'
+
+                        MDScrollView:
+                            MDList:
+                                id: best_selling_list
+
     MDScreen:
         name: 'new_sale_screen'
+        # ... Contenu de l'écran de nouvelle vente ...
         MDBoxLayout:
             orientation: 'vertical'
             MDTopAppBar:
@@ -87,28 +123,23 @@ MDScreenManager:
                 padding: "10dp"
                 spacing: "10dp"
 
-                # --- Panneau de Gauche (Contrôles) ---
                 MDBoxLayout:
                     orientation: 'vertical'
                     size_hint_x: 0.4
                     spacing: "10dp"
-
                     MDTextField:
                         id: sale_search_field
                         hint_text: "Rechercher un produit..."
                         mode: "rectangle"
                         on_text: app.search_products_for_sale()
-                        on_text_validate: app.handle_sale_search_enter() # Nom de fonction mis à jour
-
+                        on_text_validate: app.handle_sale_search_enter()
                     MDScrollView:
                         MDList:
                             id: search_results_list
 
-                # --- Panneau de Droite (Panier) ---
                 MDBoxLayout:
                     orientation: 'vertical'
                     size_hint_x: 0.6
-                    
                     MDLabel:
                         text: "Panier"
                         halign: "center"
@@ -116,21 +147,17 @@ MDScreenManager:
                         size_hint_y: None
                         height: self.texture_size[1]
                         padding_y: "10dp"
-
                     MDScrollView:
                         MDList:
                             id: cart_list
-                    
                     MDBoxLayout:
                         size_hint_y: None
                         height: "60dp"
                         padding: "10dp"
-                        
                         MDLabel:
                             id: total_label
                             text: "Total: 0.00 Fc"
                             font_style: "H6"
-                            
                         MDRaisedButton:
                             text: "Valider la Vente"
                             on_release: app.validate_sale()

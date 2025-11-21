@@ -12,12 +12,17 @@ from kivymd.uix.dialog import MDDialog
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.label import MDLabel
 from kivymd.toast import toast
+from datetime import datetime
+from kivy.utils import get_color_from_hex
 
-from database import initialiser_db, modifier_client, supprimer_client, ajouter_client as db_ajouter_client
+import database
 
-# --- Fonctions DB (inchangées) ---
+# --- Constantes ---
+STOCK_FAIBLE_SEUIL = 10 # Seuil pour déclencher l'alerte de stock faible
+
+# --- Fonctions DB ---
 def get_db_connection():
-    conn = sqlite3.connect('gestion_ventes.db')
+    conn = sqlite3.connect('gestion_ventes.db', detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -76,9 +81,12 @@ def enregistrer_vente(client_id, panier):
     conn = get_db_connection()
     try:
         total_vente = sum(item['produit']['prix_vente'] * item['quantite'] for item in panier)
+        heure_de_vente = datetime.now()
+        
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO Ventes (total, client_id) VALUES (?, ?)", (total_vente, client_id))
+        cursor.execute("INSERT INTO Ventes (date_vente, total, client_id) VALUES (?, ?, ?)", (heure_de_vente, total_vente, client_id))
         vente_id = cursor.lastrowid
+        
         for item in panier:
             produit = item['produit']
             quantite_vendue = item['quantite']
@@ -90,7 +98,27 @@ def enregistrer_vente(client_id, panier):
     finally:
         conn.close()
 
-# --- Classes de dialogue améliorées pour la navigation au clavier ---
+def get_total_revenue():
+    conn = get_db_connection()
+    total = conn.execute("SELECT SUM(total) as total FROM Ventes").fetchone()['total']
+    conn.close()
+    return total if total else 0
+
+def get_best_selling_products(limit=5):
+    conn = get_db_connection()
+    query = """
+        SELECT P.nom, SUM(DV.quantite) as total_vendu
+        FROM Details_Vente DV
+        JOIN Produits P ON DV.produit_id = P.id
+        GROUP BY P.nom
+        ORDER BY total_vendu DESC
+        LIMIT ?
+    """
+    produits = conn.execute(query, (limit,)).fetchall()
+    conn.close()
+    return produits
+
+# --- Classes de dialogue améliorées ---
 class BaseDialogContent(MDBoxLayout):
     def __init__(self, **kwargs):
         self.ok_action = kwargs.pop('ok_action', None)
@@ -109,10 +137,6 @@ class BaseDialogContent(MDBoxLayout):
         Window.unbind(on_key_down=self._on_keyboard_down)
 
     def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
-        if keycode in (13, 271):  # Enter or Numpad Enter
-            if self.ok_action:
-                self.ok_action()
-                return True
         if keycode == 43:  # Tab
             self.focus_next_field()
             return True
@@ -135,9 +159,8 @@ class ProductDialogContent(BaseDialogContent):
         self.prix_field = MDTextField(hint_text="Prix de vente (Fc)", input_filter="float")
         self.stock_field = MDTextField(hint_text="Quantité en stock", input_filter="int")
         self.fields = [self.nom_field, self.desc_field, self.prix_field, self.stock_field]
-        for field in self.fields:
-            if self.ok_action:
-                field.on_text_validate = self.ok_action
+        for i, field in enumerate(self.fields):
+            field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
             self.add_widget(field)
 
 class ClientDialogContent(BaseDialogContent):
@@ -146,9 +169,8 @@ class ClientDialogContent(BaseDialogContent):
         self.nom_field = MDTextField(hint_text="Nom du client")
         self.contact_field = MDTextField(hint_text="Contact (tél, email, ...)")
         self.fields = [self.nom_field, self.contact_field]
-        for field in self.fields:
-            if self.ok_action:
-                field.on_text_validate = self.ok_action
+        for i, field in enumerate(self.fields):
+            field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
             self.add_widget(field)
 
 class FinalizeSaleDialogContent(BaseDialogContent):
@@ -159,9 +181,8 @@ class FinalizeSaleDialogContent(BaseDialogContent):
         self.contact_field = MDTextField(hint_text="Contact (facultatif)")
         self.fields = [self.nom_field, self.contact_field]
         self.add_widget(self.total_label)
-        for field in self.fields:
-            if self.ok_action:
-                field.on_text_validate = self.ok_action
+        for i, field in enumerate(self.fields):
+            field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
             self.add_widget(field)
 
 # --- Application Principale ---
@@ -176,16 +197,34 @@ class MainApp(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "Indigo"
         self.theme_cls.theme_style = "Light"
-        initialiser_db()
+        database.initialiser_db()
         return Builder.load_file('main.kv')
 
     def on_start(self):
         self.update_all_lists()
 
+    def on_tab_switch(self, *args):
+        active_tab_name = self.root.ids.bottom_nav.current
+        if active_tab_name == 'reports_screen':
+            self.update_reports()
+
     def update_all_lists(self):
         self.update_product_list()
         self.update_client_list()
         self.update_sales_list()
+
+    def update_reports(self):
+        total_revenue = get_total_revenue()
+        self.root.ids.total_revenue_label.text = f"Chiffre d'affaires total : {total_revenue:,.2f} Fc"
+        
+        best_selling_list = self.root.ids.best_selling_list
+        best_selling_list.clear_widgets()
+        for product in get_best_selling_products():
+            item = TwoLineListItem(
+                text=f"{product['nom']}",
+                secondary_text=f"Vendu : {product['total_vendu']} unités"
+            )
+            best_selling_list.add_widget(item)
 
     def go_to_new_sale_screen(self):
         self.root.current = 'new_sale_screen'
@@ -289,7 +328,7 @@ class MainApp(MDApp):
         if not self.panier: return
         total = sum(item['produit']['prix_vente'] * item['quantite'] for item in self.panier)
         
-        def ok_action():
+        def ok_action(*args):
             self.finalize_and_save_sale(content_cls, print_ticket=False)
             
         content_cls = FinalizeSaleDialogContent(total=total, ok_action=ok_action)
@@ -313,7 +352,7 @@ class MainApp(MDApp):
         nom_client = content.nom_field.text
         if nom_client:
             contact_client = content.contact_field.text
-            client_id = db_ajouter_client(nom_client, contact_client)
+            client_id = database.ajouter_client(nom_client, contact_client)
 
         enregistrer_vente(client_id, self.panier)
         if print_ticket:
@@ -329,9 +368,11 @@ class MainApp(MDApp):
         product_list.clear_widgets()
         for p in lister_produits(search_term):
             prix_usd = p['prix_vente'] / self.taux_usd_vers_fc
+            stock_color_hex = "#FF0000" if p['quantite_stock'] <= STOCK_FAIBLE_SEUIL else "#000000"
+            
             item = TwoLineListItem(
                 text=f"{p['nom']}",
-                secondary_text=f"Prix: {p['prix_vente']:,.2f} Fc (${prix_usd:,.2f}) | Stock: {p['quantite_stock']}",
+                secondary_text=f"Prix: {p['prix_vente']:,.2f} Fc (${prix_usd:,.2f}) | [color={stock_color_hex}]Stock: {p['quantite_stock']}[/color]",
                 on_release=partial(self.show_product_choice_dialog, p)
             )
             product_list.add_widget(item)
@@ -348,15 +389,18 @@ class MainApp(MDApp):
         sales_list = self.root.ids.sales_list
         sales_list.clear_widgets()
         for v in lister_ventes():
-            client_name = v['client_nom'] if v['client_nom'] else "Client au comptant"
+            client_name = v['client_nom'] if v['client_nom'] else ""
+            date_db = v['date_vente']
+            date_formatee = date_db.strftime("%d/%m/%Y %H:%M")
+            
             item = TwoLineListItem(
                 text=f"Vente #{v['id']} - {v['total']:,.2f} Fc",
-                secondary_text=f"{v['date_vente']} - {client_name}"
+                secondary_text=f"{date_formatee} - {client_name}"
             )
             sales_list.add_widget(item)
             
     def show_add_product_dialog(self):
-        def ok_action():
+        def ok_action(*args):
             self.add_product_action(content_cls)
         content_cls = ProductDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
@@ -371,7 +415,6 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def add_product_action(self, content):
-        # CORRECTION: Ajout de la validation
         if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
             toast("Nom, prix et stock sont requis.")
             return
@@ -398,7 +441,7 @@ class MainApp(MDApp):
 
     def show_edit_product_dialog(self, *args):
         self.dialog.dismiss()
-        def ok_action():
+        def ok_action(*args):
             self.edit_product_action(content_cls)
         content_cls = ProductDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
@@ -418,7 +461,6 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def edit_product_action(self, content):
-        # CORRECTION: Ajout de la validation
         if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
             toast("Nom, prix et stock sont requis.")
             return
@@ -451,7 +493,7 @@ class MainApp(MDApp):
         self.dialog.dismiss()
 
     def show_add_client_dialog(self):
-        def ok_action():
+        def ok_action(*args):
             self.add_client_action(content_cls)
         content_cls = ClientDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
@@ -466,11 +508,10 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def add_client_action(self, content):
-        # CORRECTION: Ajout de la validation
         if not content.nom_field.text:
             toast("Le nom du client est requis.")
             return
-        db_ajouter_client(content.nom_field.text, content.contact_field.text)
+        database.ajouter_client(content.nom_field.text, content.contact_field.text)
         self.update_client_list()
         self.dialog.dismiss()
 
@@ -488,7 +529,7 @@ class MainApp(MDApp):
 
     def show_edit_client_dialog(self, *args):
         self.dialog.dismiss()
-        def ok_action():
+        def ok_action(*args):
             self.edit_client_action(content_cls)
         content_cls = ClientDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
@@ -506,11 +547,10 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def edit_client_action(self, content):
-        # CORRECTION: Ajout de la validation
         if not content.nom_field.text:
             toast("Le nom du client est requis.")
             return
-        modifier_client(self.selected_item['id'], content.nom_field.text, content.contact_field.text)
+        database.modifier_client(self.selected_item['id'], content.nom_field.text, content.contact_field.text)
         self.update_client_list()
         self.dialog.dismiss()
 
@@ -525,9 +565,9 @@ class MainApp(MDApp):
         )
         self.dialog.open()
 
-    def delete_product_action(self, *args):
-        supprimer_produit(self.selected_item['id'])
-        self.update_product_list()
+    def delete_client_action(self, *args):
+        database.supprimer_client(self.selected_item['id'])
+        self.update_client_list()
         self.dialog.dismiss()
 
     def show_rate_dialog(self):
