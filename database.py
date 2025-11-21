@@ -3,11 +3,12 @@ import sqlite3
 def initialiser_db():
     """
     Initialise la base de données et crée les tables si elles n'existent pas.
+    Gère également les migrations de schéma (ajout de colonnes).
     """
     conn = sqlite3.connect('gestion_ventes.db')
     cursor = conn.cursor()
 
-    # Table Produits
+    # Création de la table Produits
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produits (
         id TEXT PRIMARY KEY,
@@ -18,16 +19,30 @@ def initialiser_db():
     );
     """)
 
-    # Table Clients
+    # Création de la table Clients
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nom TEXT NOT NULL,
-        contact TEXT
+        contact TEXT,
+        bonus_points INTEGER DEFAULT 0
     );
     """)
 
-    # Table Ventes
+    # Vérifier et ajouter la colonne 'bonus_points' si elle n'existe pas
+    try:
+        cursor.execute("ALTER TABLE Clients ADD COLUMN bonus_points INTEGER DEFAULT 0")
+        conn.commit()
+        print("Colonne 'bonus_points' ajoutée à la table Clients.")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name: bonus_points" in str(e):
+            # La colonne existe déjà, c'est normal
+            pass
+        else:
+            # Autre erreur, la propager
+            raise e
+
+    # Création de la table Ventes
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Ventes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +53,7 @@ def initialiser_db():
     );
     """)
 
-    # Table Details_Vente
+    # Création de la table Details_Vente
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Details_Vente (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,9 +71,32 @@ def initialiser_db():
 
 def get_db_connection():
     """Crée et retourne une connexion à la base de données."""
-    conn = sqlite3.connect('gestion_ventes.db')
+    conn = sqlite3.connect('gestion_ventes.db', detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.row_factory = sqlite3.Row
     return conn
+
+def find_or_create_client(nom, contact):
+    """
+    Cherche un client par nom et contact.
+    S'il n'existe pas, le crée et retourne son ID.
+    S'il existe, retourne son ID.
+    """
+    conn = get_db_connection()
+    nom_formate = nom.title()
+    
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM Clients WHERE nom = ? AND contact = ?", (nom_formate, contact))
+    existing_client = cursor.fetchone()
+    
+    if existing_client:
+        conn.close()
+        return existing_client['id']
+    else:
+        cursor.execute("INSERT INTO Clients (nom, contact, bonus_points) VALUES (?, ?, ?)", (nom_formate, contact, 0))
+        new_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return new_id
 
 def ajouter_client(nom, contact):
     """Ajoute un nouveau client et retourne son ID."""
@@ -66,7 +104,7 @@ def ajouter_client(nom, contact):
     try:
         cursor = conn.cursor()
         nom_formate = nom.title()
-        cursor.execute("INSERT INTO Clients (nom, contact) VALUES (?, ?)", (nom_formate, contact))
+        cursor.execute("INSERT INTO Clients (nom, contact, bonus_points) VALUES (?, ?, ?)", (nom_formate, contact, 0))
         new_id = cursor.lastrowid
         conn.commit()
         return new_id
@@ -94,6 +132,25 @@ def supprimer_client(client_id):
         conn.commit()
     finally:
         conn.close()
+
+def incrementer_points_bonus(client_id):
+    """Incrémente les points de bonus d'un client."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE Clients SET bonus_points = bonus_points + 1 WHERE id = ?", (client_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_client_contact(client_id):
+    """Récupère le contact d'un client par son ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT contact FROM Clients WHERE id = ?", (client_id,))
+    contact = cursor.fetchone()
+    conn.close()
+    return contact['contact'] if contact else None
 
 if __name__ == '__main__':
     initialiser_db()

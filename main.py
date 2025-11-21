@@ -16,6 +16,7 @@ from datetime import datetime
 from kivy.utils import get_color_from_hex
 
 import database
+from database import find_or_create_client, incrementer_points_bonus, get_client_contact
 
 # --- Constantes ---
 STOCK_FAIBLE_SEUIL = 10 # Seuil pour déclencher l'alerte de stock faible
@@ -95,6 +96,9 @@ def enregistrer_vente(client_id, panier):
             nouveau_stock = produit['quantite_stock'] - quantite_vendue
             cursor.execute("UPDATE Produits SET quantite_stock = ? WHERE id = ?", (nouveau_stock, produit['id']))
         conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Erreur lors de l'enregistrement de la vente : {e}")
     finally:
         conn.close()
 
@@ -350,11 +354,15 @@ class MainApp(MDApp):
     def finalize_and_save_sale(self, content, print_ticket):
         client_id = None
         nom_client = content.nom_field.text
-        if nom_client:
-            contact_client = content.contact_field.text
-            client_id = database.ajouter_client(nom_client, contact_client)
+        contact_client = content.contact_field.text
+        
+        if nom_client: # Si un nom est fourni, on cherche/crée le client
+            client_id = find_or_create_client(nom_client, contact_client)
 
         enregistrer_vente(client_id, self.panier)
+        if client_id and contact_client: # Incrémenter les points bonus si un client est associé et a un contact
+            database.incrementer_points_bonus(client_id)
+
         if print_ticket:
             toast("Impression du ticket...")
 
@@ -381,8 +389,11 @@ class MainApp(MDApp):
         client_list = self.root.ids.client_list
         client_list.clear_widgets()
         for c in lister_clients():
-            item = TwoLineListItem(text=f"{c['nom']}", secondary_text=f"Contact: {c['contact']}",
-                                 on_release=partial(self.show_client_choice_dialog, c))
+            item = TwoLineListItem(
+                text=f"{c['nom']}",
+                secondary_text=f"Contact: {c['contact']} | Points Bonus: {c['bonus_points']}",
+                on_release=partial(self.show_client_choice_dialog, c)
+            )
             client_list.add_widget(item)
 
     def update_sales_list(self):
@@ -511,7 +522,7 @@ class MainApp(MDApp):
         if not content.nom_field.text:
             toast("Le nom du client est requis.")
             return
-        database.ajouter_client(content.nom_field.text, content.contact_field.text)
+        find_or_create_client(content.nom_field.text, content.contact_field.text)
         self.update_client_list()
         self.dialog.dismiss()
 
