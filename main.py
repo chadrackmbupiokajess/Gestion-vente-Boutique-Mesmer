@@ -12,14 +12,15 @@ from kivymd.uix.dialog import MDDialog
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.label import MDLabel
 from kivymd.toast import toast
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from kivy.utils import get_color_from_hex
+from kivymd.uix.pickers import MDDatePicker
 
 import database
 from database import find_or_create_client, incrementer_points_bonus, get_client_contact
 
 # --- Constantes ---
-STOCK_FAIBLE_SEUIL = 10 # Seuil pour déclencher l'alerte de stock faible
+STOCK_FAIBLE_SEUIL = 10
 
 # --- Fonctions DB ---
 def get_db_connection():
@@ -67,14 +68,21 @@ def lister_clients():
     conn.close()
     return clients
 
-def lister_ventes():
+def lister_ventes(filter_date=None):
     conn = get_db_connection()
-    ventes = conn.execute("""
+    query = """
         SELECT V.id, V.date_vente, V.total, C.nom as client_nom
         FROM Ventes V
         LEFT JOIN Clients C ON V.client_id = C.id
-        ORDER BY V.date_vente DESC
-    """).fetchall()
+    """
+    params = []
+    if filter_date:
+        query += " WHERE DATE(V.date_vente) = ?"
+        params.append(filter_date.strftime("%Y-%m-%d"))
+    
+    query += " ORDER BY V.date_vente DESC"
+    
+    ventes = conn.execute(query, params).fetchall()
     conn.close()
     return ventes
 
@@ -102,27 +110,39 @@ def enregistrer_vente(client_id, panier):
     finally:
         conn.close()
 
-def get_total_revenue():
+def get_total_revenue(start_date=None, end_date=None):
     conn = get_db_connection()
-    total = conn.execute("SELECT SUM(total) as total FROM Ventes").fetchone()['total']
+    query = "SELECT SUM(total) as total FROM Ventes"
+    params = []
+    if start_date and end_date:
+        query += " WHERE DATE(date_vente) BETWEEN ? AND ?"
+        params.extend([start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")])
+    
+    total = conn.execute(query, params).fetchone()['total']
     conn.close()
     return total if total else 0
 
-def get_best_selling_products(limit=5):
+def get_best_selling_products(start_date=None, end_date=None, limit=5):
     conn = get_db_connection()
     query = """
         SELECT P.nom, SUM(DV.quantite) as total_vendu
         FROM Details_Vente DV
         JOIN Produits P ON DV.produit_id = P.id
-        GROUP BY P.nom
-        ORDER BY total_vendu DESC
-        LIMIT ?
+        JOIN Ventes V ON DV.vente_id = V.id
     """
-    produits = conn.execute(query, (limit,)).fetchall()
+    params = []
+    if start_date and end_date:
+        query += " WHERE DATE(V.date_vente) BETWEEN ? AND ?"
+        params.extend([start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")])
+        
+    query += " GROUP BY P.nom ORDER BY total_vendu DESC LIMIT ?"
+    params.append(limit)
+    
+    produits = conn.execute(query, params).fetchall()
     conn.close()
     return produits
 
-# --- Classes de dialogue améliorées ---
+# --- Classes de dialogue ---
 class BaseDialogContent(MDBoxLayout):
     def __init__(self, **kwargs):
         self.ok_action = kwargs.pop('ok_action', None)
@@ -197,6 +217,9 @@ class MainApp(MDApp):
         self.taux_usd_vers_fc = 2800.0
         self.panier = []
         self.selected_item = None
+        self.sales_filter_date = None
+        self.reports_start_date = None
+        self.reports_end_date = None
 
     def build(self):
         self.theme_cls.primary_palette = "Indigo"
@@ -205,12 +228,19 @@ class MainApp(MDApp):
         return Builder.load_file('main.kv')
 
     def on_start(self):
+        self.sales_filter_date = date.today()
+        self.root.ids.sales_date_filter_field.text = self.sales_filter_date.strftime("%d/%m/%Y")
         self.update_all_lists()
 
     def on_tab_switch(self, *args):
         active_tab_name = self.root.ids.bottom_nav.current
         if active_tab_name == 'reports_screen':
-            self.update_reports()
+            self.set_reports_filter_period('all')
+        elif active_tab_name == 'sales_screen':
+            if not self.sales_filter_date:
+                self.sales_filter_date = date.today()
+                self.root.ids.sales_date_filter_field.text = self.sales_filter_date.strftime("%d/%m/%Y")
+            self.update_sales_list()
 
     def update_all_lists(self):
         self.update_product_list()
@@ -218,17 +248,54 @@ class MainApp(MDApp):
         self.update_sales_list()
 
     def update_reports(self):
-        total_revenue = get_total_revenue()
-        self.root.ids.total_revenue_label.text = f"Chiffre d'affaires total : {total_revenue:,.2f} Fc"
+        total_revenue = get_total_revenue(self.reports_start_date, self.reports_end_date)
+        self.root.ids.total_revenue_label.text = f"Chiffre d'affaires : {total_revenue:,.2f} Fc"
         
         best_selling_list = self.root.ids.best_selling_list
         best_selling_list.clear_widgets()
-        for product in get_best_selling_products():
+        for product in get_best_selling_products(self.reports_start_date, self.reports_end_date):
             item = TwoLineListItem(
                 text=f"{product['nom']}",
                 secondary_text=f"Vendu : {product['total_vendu']} unités"
             )
             best_selling_list.add_widget(item)
+
+    def set_reports_filter_period(self, period):
+        today = date.today()
+        if period == 'day':
+            self.reports_start_date = today
+            self.reports_end_date = today
+            self.root.ids.reports_date_filter_field.text = today.strftime("%d/%m/%Y")
+        elif period == 'week':
+            self.reports_start_date = today - timedelta(days=today.weekday())
+            self.reports_end_date = self.reports_start_date + timedelta(days=6)
+            self.root.ids.reports_date_filter_field.text = f"{self.reports_start_date.strftime('%d/%m')} - {self.reports_end_date.strftime('%d/%m')}"
+        elif period == 'month':
+            self.reports_start_date = today.replace(day=1)
+            next_month = self.reports_start_date.replace(day=28) + timedelta(days=4)
+            self.reports_end_date = next_month - timedelta(days=next_month.day)
+            self.root.ids.reports_date_filter_field.text = today.strftime("%B %Y")
+        else: # 'all'
+            self.reports_start_date = None
+            self.reports_end_date = None
+            self.root.ids.reports_date_filter_field.text = "Toute la période"
+        
+        self.update_reports()
+
+    def show_reports_date_picker(self):
+        date_dialog = MDDatePicker(mode="range")
+        date_dialog.bind(on_save=self.on_reports_date_select)
+        date_dialog.open()
+
+    def on_reports_date_select(self, instance, value, date_range):
+        if date_range:
+            self.reports_start_date = date_range[0]
+            self.reports_end_date = date_range[-1]
+            self.root.ids.reports_date_filter_field.text = f"{self.reports_start_date.strftime('%d/%m/%Y')} - {self.reports_end_date.strftime('%d/%m/%Y')}"
+            self.update_reports()
+
+    def clear_reports_date_filter(self):
+        self.set_reports_filter_period('all')
 
     def go_to_new_sale_screen(self):
         self.root.current = 'new_sale_screen'
@@ -356,11 +423,11 @@ class MainApp(MDApp):
         nom_client = content.nom_field.text
         contact_client = content.contact_field.text
         
-        if nom_client: # Si un nom est fourni, on cherche/crée le client
+        if nom_client:
             client_id = find_or_create_client(nom_client, contact_client)
 
         enregistrer_vente(client_id, self.panier)
-        if client_id and contact_client: # Incrémenter les points bonus si un client est associé et a un contact
+        if client_id and contact_client:
             database.incrementer_points_bonus(client_id)
 
         if print_ticket:
@@ -389,9 +456,10 @@ class MainApp(MDApp):
         client_list = self.root.ids.client_list
         client_list.clear_widgets()
         for c in lister_clients():
+            bonus_points = c['bonus_points'] if 'bonus_points' in c.keys() else 0
             item = TwoLineListItem(
                 text=f"{c['nom']}",
-                secondary_text=f"Contact: {c['contact']} | Points Bonus: {c['bonus_points']}",
+                secondary_text=f"Contact: {c['contact']} | Points Bonus: {bonus_points}",
                 on_release=partial(self.show_client_choice_dialog, c)
             )
             client_list.add_widget(item)
@@ -399,7 +467,9 @@ class MainApp(MDApp):
     def update_sales_list(self):
         sales_list = self.root.ids.sales_list
         sales_list.clear_widgets()
-        for v in lister_ventes():
+        ventes = lister_ventes(self.sales_filter_date)
+        
+        for v in ventes:
             client_name = v['client_nom'] if v['client_nom'] else ""
             date_db = v['date_vente']
             date_formatee = date_db.strftime("%d/%m/%Y %H:%M")
@@ -410,6 +480,26 @@ class MainApp(MDApp):
             )
             sales_list.add_widget(item)
             
+    def show_sales_date_picker(self):
+        if self.sales_filter_date:
+            initial_date = self.sales_filter_date
+        else:
+            initial_date = date.today()
+            
+        date_dialog = MDDatePicker(year=initial_date.year, month=initial_date.month, day=initial_date.day)
+        date_dialog.bind(on_save=self.on_sales_date_select)
+        date_dialog.open()
+
+    def on_sales_date_select(self, instance, value, date_range):
+        self.sales_filter_date = value
+        self.root.ids.sales_date_filter_field.text = value.strftime("%d/%m/%Y")
+        self.update_sales_list()
+
+    def clear_sales_date_filter(self):
+        self.sales_filter_date = None
+        self.root.ids.sales_date_filter_field.text = ""
+        self.update_sales_list()
+
     def show_add_product_dialog(self):
         def ok_action(*args):
             self.add_product_action(content_cls)
