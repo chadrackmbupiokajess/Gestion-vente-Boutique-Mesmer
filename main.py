@@ -42,17 +42,17 @@ def lister_produits_en_stock(search_term=""):
     conn.close()
     return produits
 
-def ajouter_produit(nom, desc, prix, stock):
+def ajouter_produit(nom, desc, prix_achat, prix_vente, stock):
     conn = get_db_connection()
-    conn.execute("INSERT INTO Produits (id, nom, description, prix_vente, quantite_stock) VALUES (?, ?, ?, ?, ?)",
-                 ('PROD-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=4)), nom.capitalize(), desc, prix, stock))
+    conn.execute("INSERT INTO Produits (id, nom, description, prix_achat, prix_vente, quantite_stock) VALUES (?, ?, ?, ?, ?, ?)",
+                 ('PROD-' + ''.join(random.choices(string.ascii_uppercase + string.digits, k=4)), nom.capitalize(), desc, prix_achat, prix_vente, stock))
     conn.commit()
     conn.close()
 
-def modifier_produit(produit_id, nom, desc, prix, stock):
+def modifier_produit(produit_id, nom, desc, prix_achat, prix_vente, stock):
     conn = get_db_connection()
-    conn.execute("UPDATE Produits SET nom = ?, description = ?, prix_vente = ?, quantite_stock = ? WHERE id = ?",
-                 (nom.capitalize(), desc, prix, stock, produit_id))
+    conn.execute("UPDATE Produits SET nom = ?, description = ?, prix_achat = ?, prix_vente = ?, quantite_stock = ? WHERE id = ?",
+                 (nom.capitalize(), desc, prix_achat, prix_vente, stock, produit_id))
     conn.commit()
     conn.close()
 
@@ -104,9 +104,6 @@ def enregistrer_vente(client_id, panier):
             nouveau_stock = produit['quantite_stock'] - quantite_vendue
             cursor.execute("UPDATE Produits SET quantite_stock = ? WHERE id = ?", (nouveau_stock, produit['id']))
         conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print(f"Erreur lors de l'enregistrement de la vente : {e}")
     finally:
         conn.close()
 
@@ -121,6 +118,23 @@ def get_total_revenue(start_date=None, end_date=None):
     total = conn.execute(query, params).fetchone()['total']
     conn.close()
     return total if total else 0
+
+def get_total_profit(start_date=None, end_date=None):
+    conn = get_db_connection()
+    query = """
+        SELECT SUM(DV.quantite * (DV.prix_unitaire - P.prix_achat)) as profit
+        FROM Details_Vente DV
+        JOIN Produits P ON DV.produit_id = P.id
+        JOIN Ventes V ON DV.vente_id = V.id
+    """
+    params = []
+    if start_date and end_date:
+        query += " WHERE DATE(V.date_vente) BETWEEN ? AND ?"
+        params.extend([start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")])
+        
+    profit = conn.execute(query, params).fetchone()['profit']
+    conn.close()
+    return profit if profit else 0
 
 def get_best_selling_products(start_date=None, end_date=None, limit=5):
     conn = get_db_connection()
@@ -177,12 +191,13 @@ class BaseDialogContent(MDBoxLayout):
 
 class ProductDialogContent(BaseDialogContent):
     def __init__(self, **kwargs):
-        super().__init__(height="300dp", **kwargs)
+        super().__init__(height="350dp", **kwargs)
         self.nom_field = MDTextField(hint_text="Nom du produit")
         self.desc_field = MDTextField(hint_text="Description")
-        self.prix_field = MDTextField(hint_text="Prix de vente (Fc)", input_filter="float")
+        self.prix_achat_field = MDTextField(hint_text="Prix d'achat (Fc)", input_filter="float")
+        self.prix_vente_field = MDTextField(hint_text="Prix de vente (Fc)", input_filter="float")
         self.stock_field = MDTextField(hint_text="Quantité en stock", input_filter="int")
-        self.fields = [self.nom_field, self.desc_field, self.prix_field, self.stock_field]
+        self.fields = [self.nom_field, self.desc_field, self.prix_achat_field, self.prix_vente_field, self.stock_field]
         for i, field in enumerate(self.fields):
             field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
             self.add_widget(field)
@@ -249,7 +264,8 @@ class MainApp(MDApp):
 
     def update_reports(self):
         total_revenue = get_total_revenue(self.reports_start_date, self.reports_end_date)
-        self.root.ids.total_revenue_label.text = f"Chiffre d'affaires : {total_revenue:,.2f} Fc"
+        total_profit = get_total_profit(self.reports_start_date, self.reports_end_date)
+        self.root.ids.total_revenue_label.text = f"Chiffre d'affaires : {total_revenue:,.2f} Fc | Bénéfice : {total_profit:,.2f} Fc"
         
         best_selling_list = self.root.ids.best_selling_list
         best_selling_list.clear_widgets()
@@ -516,17 +532,18 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def add_product_action(self, content):
-        if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
-            toast("Nom, prix et stock sont requis.")
+        if not content.nom_field.text or not content.prix_vente_field.text or not content.stock_field.text:
+            toast("Nom, prix de vente et stock sont requis.")
             return
         try:
-            prix = float(content.prix_field.text)
+            prix_achat = float(content.prix_achat_field.text) if content.prix_achat_field.text else 0.0
+            prix_vente = float(content.prix_vente_field.text)
             stock = int(content.stock_field.text)
-            ajouter_produit(content.nom_field.text, content.desc_field.text, prix, stock)
+            ajouter_produit(content.nom_field.text, content.desc_field.text, prix_achat, prix_vente, stock)
             self.update_product_list()
             self.dialog.dismiss()
         except ValueError:
-            toast("Veuillez entrer un nombre valide pour le prix et le stock.")
+            toast("Veuillez entrer un nombre valide pour les prix et le stock.")
 
     def show_product_choice_dialog(self, produit, *args):
         self.selected_item = produit
@@ -547,7 +564,8 @@ class MainApp(MDApp):
         content_cls = ProductDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
         content_cls.desc_field.text = self.selected_item['description']
-        content_cls.prix_field.text = str(self.selected_item['prix_vente'])
+        content_cls.prix_achat_field.text = str(self.selected_item['prix_achat'])
+        content_cls.prix_vente_field.text = str(self.selected_item['prix_vente'])
         content_cls.stock_field.text = str(self.selected_item['quantite_stock'])
         
         self.dialog = MDDialog(
@@ -562,20 +580,21 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def edit_product_action(self, content):
-        if not content.nom_field.text or not content.prix_field.text or not content.stock_field.text:
-            toast("Nom, prix et stock sont requis.")
+        if not content.nom_field.text or not content.prix_vente_field.text or not content.stock_field.text:
+            toast("Nom, prix de vente et stock sont requis.")
             return
         try:
-            prix = float(content.prix_field.text)
+            prix_achat = float(content.prix_achat_field.text) if content.prix_achat_field.text else 0.0
+            prix_vente = float(content.prix_vente_field.text)
             stock = int(content.stock_field.text)
             modifier_produit(
                 self.selected_item['id'], content.nom_field.text, content.desc_field.text,
-                prix, stock
+                prix_achat, prix_vente, stock
             )
             self.update_product_list()
             self.dialog.dismiss()
         except ValueError:
-            toast("Veuillez entrer un nombre valide pour le prix et le stock.")
+            toast("Veuillez entrer un nombre valide pour les prix et le stock.")
 
     def show_delete_product_dialog(self, *args):
         self.dialog.dismiss()

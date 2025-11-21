@@ -8,12 +8,35 @@ def initialiser_db():
     conn = sqlite3.connect('gestion_ventes.db')
     cursor = conn.cursor()
 
+    # --- Migration: Ajouter la colonne prix_achat à Produits ---
+    try:
+        cursor.execute("ALTER TABLE Produits ADD COLUMN prix_achat REAL DEFAULT 0")
+        conn.commit()
+        print("Colonne 'prix_achat' ajoutée à la table Produits.")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            pass  # La colonne existe déjà, c'est normal
+        else:
+            raise e
+
+    # --- Migration: Ajouter la colonne bonus_points à Clients ---
+    try:
+        cursor.execute("ALTER TABLE Clients ADD COLUMN bonus_points INTEGER DEFAULT 0")
+        conn.commit()
+        print("Colonne 'bonus_points' ajoutée à la table Clients.")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e):
+            pass  # La colonne existe déjà, c'est normal
+        else:
+            raise e
+
     # Création de la table Produits
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS Produits (
         id TEXT PRIMARY KEY,
         nom TEXT NOT NULL UNIQUE,
         description TEXT,
+        prix_achat REAL DEFAULT 0,
         prix_vente REAL NOT NULL,
         quantite_stock INTEGER NOT NULL
     );
@@ -28,19 +51,6 @@ def initialiser_db():
         bonus_points INTEGER DEFAULT 0
     );
     """)
-
-    # Vérifier et ajouter la colonne 'bonus_points' si elle n'existe pas
-    try:
-        cursor.execute("ALTER TABLE Clients ADD COLUMN bonus_points INTEGER DEFAULT 0")
-        conn.commit()
-        print("Colonne 'bonus_points' ajoutée à la table Clients.")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name: bonus_points" in str(e):
-            # La colonne existe déjà, c'est normal
-            pass
-        else:
-            # Autre erreur, la propager
-            raise e
 
     # Création de la table Ventes
     cursor.execute("""
