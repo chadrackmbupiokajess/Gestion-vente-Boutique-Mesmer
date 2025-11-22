@@ -263,6 +263,7 @@ class MainApp(MDApp):
         self.update_sales_list()
 
     def update_reports(self):
+        # Rapports de ventes
         total_revenue = get_total_revenue(self.reports_start_date, self.reports_end_date)
         total_profit = get_total_profit(self.reports_start_date, self.reports_end_date)
         self.root.ids.total_revenue_label.text = f"Chiffre d'affaires : {total_revenue:,.2f} Fc | Bénéfice : {total_profit:,.2f} Fc"
@@ -275,6 +276,24 @@ class MainApp(MDApp):
                 secondary_text=f"Vendu : {product['total_vendu']} unités"
             )
             best_selling_list.add_widget(item)
+        
+        # Rapport d'inventaire
+        self.update_inventory_report()
+
+    def update_inventory_report(self):
+        inventory_list = self.root.ids.inventory_report_list
+        inventory_list.clear_widgets()
+        total_value = 0
+        for p in lister_produits():
+            stock_value = p['prix_achat'] * p['quantite_stock']
+            total_value += stock_value
+            stock_color_hex = "#FF0000" if p['quantite_stock'] <= STOCK_FAIBLE_SEUIL else "#000000"
+            
+            item = TwoLineListItem(
+                text=f"{p['nom']}",
+                secondary_text=f"[color={stock_color_hex}]Stock: {p['quantite_stock']}[/color] | Valeur: {stock_value:,.2f} Fc"
+            )
+            inventory_list.add_widget(item)
 
     def set_reports_filter_period(self, period):
         today = date.today()

@@ -66,7 +66,7 @@ MDScreenManager:
                     MDTopAppBar:
                         title: "Historique des Ventes"
                         elevation: 4
-
+                    
                     MDBoxLayout:
                         orientation: 'horizontal'
                         size_hint_y: None
@@ -98,68 +98,93 @@ MDScreenManager:
                 name: 'reports_screen'
                 text: 'Rapports'
                 icon: 'chart-bar'
-
+                
                 MDBoxLayout:
                     orientation: 'vertical'
                     MDTopAppBar:
                         title: "Rapports et Statistiques"
                         elevation: 4
+                    
+                    MDScrollView:
+                        MDBoxLayout:
+                            orientation: 'vertical'
+                            adaptive_height: True
+                            padding: "20dp"
+                            spacing: "15dp"
 
-                    MDBoxLayout:
-                        orientation: 'vertical'
-                        padding: "20dp"
-                        spacing: "20dp"
+                            MDBoxLayout: # Conteneur pour les filtres de rapport
+                                orientation: 'horizontal'
+                                size_hint_y: None
+                                height: "48dp"
+                                spacing: "10dp"
+                                MDTextField:
+                                    id: reports_date_filter_field
+                                    hint_text: "Période du rapport"
+                                    mode: "rectangle"
+                                    readonly: True
+                                    on_touch_down: app.show_reports_date_picker() if self.collide_point(*args[1].pos) else False
+                                MDIconButton:
+                                    icon: "calendar"
+                                    on_release: app.show_reports_date_picker()
+                                MDIconButton:
+                                    icon: "close-circle"
+                                    on_release: app.clear_reports_date_filter()
+                            
+                            MDBoxLayout: # Boutons de filtre rapide
+                                orientation: 'horizontal'
+                                size_hint_y: None
+                                height: "48dp"
+                                spacing: "10dp"
+                                adaptive_width: True
+                                pos_hint: {"center_x": 0.5}
+                                MDFlatButton:
+                                    text: "Jour"
+                                    on_release: app.set_reports_filter_period('day')
+                                MDFlatButton:
+                                    text: "Semaine"
+                                    on_release: app.set_reports_filter_period('week')
+                                MDFlatButton:
+                                    text: "Mois"
+                                    on_release: app.set_reports_filter_period('month')
+                                MDFlatButton:
+                                    text: "Total"
+                                    on_release: app.set_reports_filter_period('all')
 
-                        MDBoxLayout: # Nouveau conteneur pour les filtres de rapport
-                            orientation: 'horizontal'
-                            size_hint_y: None
-                            height: "48dp"
-                            spacing: "10dp"
-                            MDTextField:
-                                id: reports_date_filter_field
-                                hint_text: "Période du rapport"
-                                mode: "rectangle"
-                                readonly: True
-                                on_touch_down: app.show_reports_date_picker() if self.collide_point(*args[1].pos) else False
-                            MDIconButton:
-                                icon: "calendar"
-                                on_release: app.show_reports_date_picker()
-                            MDIconButton:
-                                icon: "close-circle"
-                                on_release: app.clear_reports_date_filter()
+                            MDLabel:
+                                id: total_revenue_label
+                                text: "Chiffre d'affaires total : 0 Fc"
+                                halign: 'center'
+                                font_style: 'H5'
+                                size_hint_y: None
+                                height: self.texture_size[1]
+                            
+                            MDSeparator:
+                                height: "1dp"
 
-                        MDBoxLayout: # Boutons de filtre rapide
-                            orientation: 'horizontal'
-                            size_hint_y: None
-                            height: "48dp"
-                            spacing: "10dp"
-                            MDFlatButton:
-                                text: "Jour"
-                                on_release: app.set_reports_filter_period('day')
-                            MDFlatButton:
-                                text: "Semaine"
-                                on_release: app.set_reports_filter_period('week')
-                            MDFlatButton:
-                                text: "Mois"
-                                on_release: app.set_reports_filter_period('month')
-                            MDFlatButton:
-                                text: "Total"
-                                on_release: app.set_reports_filter_period('all')
+                            MDLabel:
+                                text: "Produits les plus vendus"
+                                halign: 'center'
+                                font_style: 'H6'
+                                size_hint_y: None
+                                height: self.texture_size[1]
+                                padding_y: "10dp"
 
-                        MDLabel:
-                            id: total_revenue_label
-                            text: "Chiffre d'affaires total : 0 Fc"
-                            halign: 'center'
-                            font_style: 'H5'
-
-                        MDLabel:
-                            text: "Produits les plus vendus"
-                            halign: 'center'
-                            font_style: 'H6'
-
-                        MDScrollView:
                             MDList:
                                 id: best_selling_list
+
+                            MDSeparator:
+                                height: "1dp"
+
+                            MDLabel:
+                                text: "Rapport d'Inventaire"
+                                halign: 'center'
+                                font_style: 'H6'
+                                size_hint_y: None
+                                height: self.texture_size[1]
+                                padding_y: "10dp"
+
+                            MDList:
+                                id: inventory_report_list
 
     MDScreen:
         name: 'new_sale_screen'
