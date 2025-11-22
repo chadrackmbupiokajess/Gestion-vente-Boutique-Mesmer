@@ -5,6 +5,42 @@ MDScreenManager:
     id: screen_manager
 
     MDScreen:
+        name: 'login_screen'
+        MDBoxLayout:
+            orientation: 'vertical'
+            padding: "40dp"
+            spacing: "30dp"
+            pos_hint: {'center_x': 0.5, 'center_y': 0.5}
+            size_hint: 0.8, 0.6
+
+            MDLabel:
+                text: "CONNEXION"
+                font_style: "H4"
+                halign: "center"
+                size_hint_y: None
+                height: self.texture_size[1]
+
+            MDTextField:
+                id: username_field
+                hint_text: "Nom d'utilisateur"
+                icon_left: "account"
+                mode: "rectangle"
+                on_text_validate: password_field.focus = True
+
+            MDTextField:
+                id: password_field
+                hint_text: "Mot de passe"
+                icon_left: "key-variant"
+                password: True
+                mode: "rectangle"
+                on_text_validate: app.login()
+
+            MDRaisedButton:
+                text: "SE CONNECTER"
+                on_release: app.login()
+                pos_hint: {'center_x': 0.5}
+
+    MDScreen:
         name: 'main_screen'
         MDBottomNavigation:
             id: bottom_nav
@@ -20,6 +56,7 @@ MDScreenManager:
                 MDBoxLayout:
                     orientation: 'vertical'
                     MDTopAppBar:
+                        id: product_toolbar
                         title: "Gestion des Produits"
                         elevation: 4
                         right_action_items: [["currency-usd", lambda x: app.show_rate_dialog()]]
@@ -36,6 +73,7 @@ MDScreenManager:
                         MDList:
                             id: product_list
                 MDFloatingActionButton:
+                    id: add_product_button
                     icon: "plus"
                     pos_hint: {"center_x": 0.5, "center_y": 0.15}
                     on_release: app.show_add_product_dialog()
@@ -53,6 +91,7 @@ MDScreenManager:
                         MDList:
                             id: client_list
                 MDFloatingActionButton:
+                    id: add_client_button
                     icon: "plus"
                     pos_hint: {"center_x": 0.5, "center_y": 0.15}
                     on_release: app.show_add_client_dialog()
@@ -95,6 +134,7 @@ MDScreenManager:
                     on_release: app.go_to_new_sale_screen()
 
             MDBottomNavigationItem:
+                id: reports_tab
                 name: 'reports_screen'
                 text: 'Rapports'
                 icon: 'chart-bar'
@@ -112,7 +152,7 @@ MDScreenManager:
                             padding: "20dp"
                             spacing: "15dp"
 
-                            MDBoxLayout: # Conteneur pour les filtres de rapport
+                            MDBoxLayout:
                                 orientation: 'horizontal'
                                 size_hint_y: None
                                 height: "48dp"
@@ -130,7 +170,7 @@ MDScreenManager:
                                     icon: "close-circle"
                                     on_release: app.clear_reports_date_filter()
                             
-                            MDBoxLayout: # Boutons de filtre rapide
+                            MDBoxLayout:
                                 orientation: 'horizontal'
                                 size_hint_y: None
                                 height: "48dp"
@@ -185,6 +225,25 @@ MDScreenManager:
 
                             MDList:
                                 id: inventory_report_list
+            
+            MDBottomNavigationItem:
+                id: users_tab
+                name: 'users_screen'
+                text: 'Utilisateurs'
+                icon: 'account-cog'
+                MDBoxLayout:
+                    orientation: 'vertical'
+                    MDTopAppBar:
+                        title: "Gestion des Utilisateurs"
+                        elevation: 4
+                    MDScrollView:
+                        MDList:
+                            id: user_list
+                MDFloatingActionButton:
+                    id: add_user_button
+                    icon: "plus"
+                    pos_hint: {"center_x": 0.5, "center_y": 0.15}
+                    on_release: app.show_add_user_dialog()
 
     MDScreen:
         name: 'new_sale_screen'

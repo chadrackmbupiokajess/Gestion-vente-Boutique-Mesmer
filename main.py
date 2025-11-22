@@ -212,6 +212,16 @@ class ClientDialogContent(BaseDialogContent):
             field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
             self.add_widget(field)
 
+class UserDialogContent(BaseDialogContent):
+    def __init__(self, **kwargs):
+        super().__init__(height="180dp", **kwargs)
+        self.username_field = MDTextField(hint_text="Nom d'utilisateur")
+        self.password_field = MDTextField(hint_text="Mot de passe", password=True)
+        self.fields = [self.username_field, self.password_field]
+        for i, field in enumerate(self.fields):
+            field.on_text_validate = self.focus_next_field if i < len(self.fields) - 1 else self.ok_action
+            self.add_widget(field)
+
 class FinalizeSaleDialogContent(BaseDialogContent):
     def __init__(self, total, **kwargs):
         super().__init__(height="240dp", **kwargs)
@@ -235,6 +245,7 @@ class MainApp(MDApp):
         self.sales_filter_date = None
         self.reports_start_date = None
         self.reports_end_date = None
+        self.current_user = None
 
     def build(self):
         self.theme_cls.primary_palette = "Indigo"
@@ -243,9 +254,50 @@ class MainApp(MDApp):
         return Builder.load_file('main.kv')
 
     def on_start(self):
-        self.sales_filter_date = date.today()
-        self.root.ids.sales_date_filter_field.text = self.sales_filter_date.strftime("%d/%m/%Y")
-        self.update_all_lists()
+        self.root.current = 'login_screen'
+        Window.bind(on_key_down=self._on_keyboard_down)
+
+    def _on_keyboard_down(self, instance, keyboard, keycode, text, modifiers):
+        if self.root.current == 'login_screen' and keycode == 43:  # Tab
+            if self.root.ids.username_field.focus:
+                self.root.ids.password_field.focus = True
+            else:
+                self.root.ids.username_field.focus = True
+            return True
+
+    def login(self):
+        username = self.root.ids.username_field.text
+        password = self.root.ids.password_field.text
+        user = database.verifier_utilisateur(username, password)
+        if user:
+            self.current_user = user
+            self.root.current = 'main_screen'
+            self.setup_ui_for_role()
+            self.sales_filter_date = date.today()
+            if 'sales_date_filter_field' in self.root.ids:
+                self.root.ids.sales_date_filter_field.text = self.sales_filter_date.strftime("%d/%m/%Y")
+            self.update_all_lists()
+        else:
+            toast("Nom d'utilisateur ou mot de passe incorrect.")
+
+    def logout(self):
+        self.current_user = None
+        self.root.current = 'login_screen'
+        self.root.ids.username_field.text = ""
+        self.root.ids.password_field.text = ""
+
+    def setup_ui_for_role(self):
+        is_admin = self.current_user['role'] == 'admin'
+        
+        self.root.ids.add_product_button.disabled = not is_admin
+        self.root.ids.add_client_button.disabled = not is_admin
+        self.root.ids.reports_tab.disabled = not is_admin
+        self.root.ids.users_tab.disabled = not is_admin
+        
+        self.root.ids.product_toolbar.right_action_items = [
+            ["currency-usd", lambda x: self.show_rate_dialog()],
+            ["logout", lambda x: self.logout()]
+        ]
 
     def on_tab_switch(self, *args):
         active_tab_name = self.root.ids.bottom_nav.current
@@ -256,14 +308,17 @@ class MainApp(MDApp):
                 self.sales_filter_date = date.today()
                 self.root.ids.sales_date_filter_field.text = self.sales_filter_date.strftime("%d/%m/%Y")
             self.update_sales_list()
+        elif active_tab_name == 'users_screen':
+            self.update_user_list()
 
     def update_all_lists(self):
         self.update_product_list()
         self.update_client_list()
         self.update_sales_list()
+        if self.current_user and self.current_user['role'] == 'admin':
+            self.update_user_list()
 
     def update_reports(self):
-        # Rapports de ventes
         total_revenue = get_total_revenue(self.reports_start_date, self.reports_end_date)
         total_profit = get_total_profit(self.reports_start_date, self.reports_end_date)
         self.root.ids.total_revenue_label.text = f"Chiffre d'affaires : {total_revenue:,.2f} Fc | Bénéfice : {total_profit:,.2f} Fc"
@@ -271,29 +326,29 @@ class MainApp(MDApp):
         best_selling_list = self.root.ids.best_selling_list
         best_selling_list.clear_widgets()
         for product in get_best_selling_products(self.reports_start_date, self.reports_end_date):
-            item = TwoLineListItem(
-                text=f"{product['nom']}",
-                secondary_text=f"Vendu : {product['total_vendu']} unités"
-            )
+            item = TwoLineListItem(text=f"{product['nom']}", secondary_text=f"Vendu : {product['total_vendu']} unités")
             best_selling_list.add_widget(item)
         
-        # Rapport d'inventaire
         self.update_inventory_report()
 
     def update_inventory_report(self):
         inventory_list = self.root.ids.inventory_report_list
         inventory_list.clear_widgets()
-        total_value = 0
         for p in lister_produits():
             stock_value = p['prix_achat'] * p['quantite_stock']
-            total_value += stock_value
             stock_color_hex = "#FF0000" if p['quantite_stock'] <= STOCK_FAIBLE_SEUIL else "#000000"
-            
             item = TwoLineListItem(
                 text=f"{p['nom']}",
                 secondary_text=f"[color={stock_color_hex}]Stock: {p['quantite_stock']}[/color] | Valeur: {stock_value:,.2f} Fc"
             )
             inventory_list.add_widget(item)
+
+    def update_user_list(self):
+        user_list = self.root.ids.user_list
+        user_list.clear_widgets()
+        for user in database.lister_utilisateurs():
+            item = OneLineListItem(text=f"{user['username']} ({user['role']})")
+            user_list.add_widget(item)
 
     def set_reports_filter_period(self, period):
         today = date.today()
@@ -314,7 +369,6 @@ class MainApp(MDApp):
             self.reports_start_date = None
             self.reports_end_date = None
             self.root.ids.reports_date_filter_field.text = "Toute la période"
-        
         self.update_reports()
 
     def show_reports_date_picker(self):
@@ -360,31 +414,22 @@ class MainApp(MDApp):
                 results_list.add_widget(item)
 
     def handle_sale_search_enter(self):
-        search_field = self.root.ids.sale_search_field
-        if not search_field.text and self.panier:
+        if not self.root.ids.sale_search_field.text and self.panier:
             self.validate_sale()
         else:
             self.select_first_product_from_search()
 
     def select_first_product_from_search(self):
         results_list = self.root.ids.search_results_list
-        if not results_list.children:
-            return
-        first_item_widget = results_list.children[-1]
-        product_data = first_item_widget.product_data
-        self.ask_quantity_for_product(product_data)
+        if not results_list.children: return
+        self.ask_quantity_for_product(results_list.children[-1].product_data)
 
     def ask_quantity_for_product(self, produit, *args):
-        def add_action(quantity_field):
-            self.add_to_cart(produit, quantity_field.text)
-
+        def add_action(q_field): self.add_to_cart(produit, q_field.text)
         quantity_field = MDTextField(hint_text="Quantité", input_filter="int")
         quantity_field.on_text_validate = lambda: add_action(quantity_field)
-
         self.dialog = MDDialog(
-            title=f"Quantité pour {produit['nom']}",
-            type="custom",
-            content_cls=quantity_field,
+            title=f"Quantité pour {produit['nom']}", type="custom", content_cls=quantity_field,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
                 MDFlatButton(text="AJOUTER", on_release=lambda x: add_action(quantity_field)),
@@ -400,7 +445,6 @@ class MainApp(MDApp):
             quantity = int(quantity_text)
             if quantity <= 0 or quantity > produit['quantite_stock']: return
         except ValueError: return
-
         self.panier.append({'produit': produit, 'quantite': quantity})
         self.update_cart_list()
         self.root.ids.sale_search_field.text = ""
@@ -410,20 +454,16 @@ class MainApp(MDApp):
     def update_cart_list(self):
         cart_list = self.root.ids.cart_list
         cart_list.clear_widgets()
-        total = 0
+        total = sum(item['produit']['prix_vente'] * item['quantite'] for item in self.panier)
         for item in self.panier:
             p, q = item['produit'], item['quantite']
             subtotal = p['prix_vente'] * q
-            total += subtotal
-            
             line_item = MDBoxLayout(adaptive_height=True, spacing="10dp")
             label = OneLineListItem(text=f"{q} x {p['nom']} - {subtotal:,.2f} Fc")
             delete_button = MDIconButton(icon="trash-can", on_release=partial(self.remove_from_cart, item))
-            
             line_item.add_widget(label)
             line_item.add_widget(delete_button)
             cart_list.add_widget(line_item)
-            
         self.root.ids.total_label.text = f"Total: {total:,.2f} Fc"
 
     def remove_from_cart(self, item, *args):
@@ -433,16 +473,10 @@ class MainApp(MDApp):
     def validate_sale(self):
         if not self.panier: return
         total = sum(item['produit']['prix_vente'] * item['quantite'] for item in self.panier)
-        
-        def ok_action(*args):
-            self.finalize_and_save_sale(content_cls, print_ticket=False)
-            
+        def ok_action(*args): self.finalize_and_save_sale(content_cls, print_ticket=False)
         content_cls = FinalizeSaleDialogContent(total=total, ok_action=ok_action)
-        
         self.dialog = MDDialog(
-            title="Finaliser la Vente",
-            type="custom",
-            content_cls=content_cls,
+            title="Finaliser la Vente", type="custom", content_cls=content_cls,
             buttons=[
                 MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
                 MDFlatButton(text="OK", on_release=ok_action),
@@ -454,20 +488,11 @@ class MainApp(MDApp):
         self.dialog.open()
 
     def finalize_and_save_sale(self, content, print_ticket):
-        client_id = None
-        nom_client = content.nom_field.text
-        contact_client = content.contact_field.text
-        
-        if nom_client:
-            client_id = find_or_create_client(nom_client, contact_client)
-
+        client_id = find_or_create_client(content.nom_field.text, content.contact_field.text) if content.nom_field.text else None
         enregistrer_vente(client_id, self.panier)
-        if client_id and contact_client:
+        if client_id and content.contact_field.text:
             database.incrementer_points_bonus(client_id)
-
-        if print_ticket:
-            toast("Impression du ticket...")
-
+        if print_ticket: toast("Impression du ticket...")
         self.dialog.dismiss()
         self.panier = []
         self.update_cart_list()
@@ -479,7 +504,6 @@ class MainApp(MDApp):
         for p in lister_produits(search_term):
             prix_usd = p['prix_vente'] / self.taux_usd_vers_fc
             stock_color_hex = "#FF0000" if p['quantite_stock'] <= STOCK_FAIBLE_SEUIL else "#000000"
-            
             item = TwoLineListItem(
                 text=f"{p['nom']}",
                 secondary_text=f"Prix: {p['prix_vente']:,.2f} Fc (${prix_usd:,.2f}) | [color={stock_color_hex}]Stock: {p['quantite_stock']}[/color]",
@@ -491,7 +515,7 @@ class MainApp(MDApp):
         client_list = self.root.ids.client_list
         client_list.clear_widgets()
         for c in lister_clients():
-            bonus_points = c['bonus_points'] if 'bonus_points' in c.keys() else 0
+            bonus_points = c['bonus_points']
             item = TwoLineListItem(
                 text=f"{c['nom']}",
                 secondary_text=f"Contact: {c['contact']} | Points Bonus: {bonus_points}",
@@ -502,25 +526,16 @@ class MainApp(MDApp):
     def update_sales_list(self):
         sales_list = self.root.ids.sales_list
         sales_list.clear_widgets()
-        ventes = lister_ventes(self.sales_filter_date)
-        
-        for v in ventes:
-            client_name = v['client_nom'] if v['client_nom'] else ""
-            date_db = v['date_vente']
-            date_formatee = date_db.strftime("%d/%m/%Y %H:%M")
-            
+        for v in lister_ventes(self.sales_filter_date):
+            date_formatee = v['date_vente'].strftime("%d/%m/%Y %H:%M")
             item = TwoLineListItem(
                 text=f"Vente #{v['id']} - {v['total']:,.2f} Fc",
-                secondary_text=f"{date_formatee} - {client_name}"
+                secondary_text=f"{date_formatee} - {v['client_nom'] or ''}"
             )
             sales_list.add_widget(item)
             
     def show_sales_date_picker(self):
-        if self.sales_filter_date:
-            initial_date = self.sales_filter_date
-        else:
-            initial_date = date.today()
-            
+        initial_date = self.sales_filter_date or date.today()
         date_dialog = MDDatePicker(year=initial_date.year, month=initial_date.month, day=initial_date.day)
         date_dialog.bind(on_save=self.on_sales_date_select)
         date_dialog.open()
@@ -536,35 +551,30 @@ class MainApp(MDApp):
         self.update_sales_list()
 
     def show_add_product_dialog(self):
-        def ok_action(*args):
-            self.add_product_action(content_cls)
+        def ok_action(*args): self.add_product_action(content_cls)
         content_cls = ProductDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
             title="Ajouter un Produit", type="custom", content_cls=content_cls,
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="AJOUTER", on_release=ok_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="AJOUTER", on_release=ok_action)],
         )
         content_cls.on_open()
         self.dialog.on_dismiss = content_cls.on_dismiss
         self.dialog.open()
 
     def add_product_action(self, content):
-        if not content.nom_field.text or not content.prix_vente_field.text or not content.stock_field.text:
+        if not all([content.nom_field.text, content.prix_vente_field.text, content.stock_field.text]):
             toast("Nom, prix de vente et stock sont requis.")
             return
         try:
-            prix_achat = float(content.prix_achat_field.text) if content.prix_achat_field.text else 0.0
-            prix_vente = float(content.prix_vente_field.text)
-            stock = int(content.stock_field.text)
-            ajouter_produit(content.nom_field.text, content.desc_field.text, prix_achat, prix_vente, stock)
+            prix_achat = float(content.prix_achat_field.text or 0.0)
+            ajouter_produit(content.nom_field.text, content.desc_field.text, prix_achat, float(content.prix_vente_field.text), int(content.stock_field.text))
             self.update_product_list()
             self.dialog.dismiss()
         except ValueError:
             toast("Veuillez entrer un nombre valide pour les prix et le stock.")
 
     def show_product_choice_dialog(self, produit, *args):
+        if self.current_user['role'] != 'admin': return
         self.selected_item = produit
         self.dialog = MDDialog(
             title=f"Actions pour {produit['nom']}",
@@ -578,38 +588,28 @@ class MainApp(MDApp):
 
     def show_edit_product_dialog(self, *args):
         self.dialog.dismiss()
-        def ok_action(*args):
-            self.edit_product_action(content_cls)
+        def ok_action(*args): self.edit_product_action(content_cls)
         content_cls = ProductDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
         content_cls.desc_field.text = self.selected_item['description']
         content_cls.prix_achat_field.text = str(self.selected_item['prix_achat'])
         content_cls.prix_vente_field.text = str(self.selected_item['prix_vente'])
         content_cls.stock_field.text = str(self.selected_item['quantite_stock'])
-        
         self.dialog = MDDialog(
             title="Modifier un Produit", type="custom", content_cls=content_cls,
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SAUVEGARDER", on_release=ok_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="SAUVEGARDER", on_release=ok_action)],
         )
         content_cls.on_open()
         self.dialog.on_dismiss = content_cls.on_dismiss
         self.dialog.open()
 
     def edit_product_action(self, content):
-        if not content.nom_field.text or not content.prix_vente_field.text or not content.stock_field.text:
+        if not all([content.nom_field.text, content.prix_vente_field.text, content.stock_field.text]):
             toast("Nom, prix de vente et stock sont requis.")
             return
         try:
-            prix_achat = float(content.prix_achat_field.text) if content.prix_achat_field.text else 0.0
-            prix_vente = float(content.prix_vente_field.text)
-            stock = int(content.stock_field.text)
-            modifier_produit(
-                self.selected_item['id'], content.nom_field.text, content.desc_field.text,
-                prix_achat, prix_vente, stock
-            )
+            prix_achat = float(content.prix_achat_field.text or 0.0)
+            modifier_produit(self.selected_item['id'], content.nom_field.text, content.desc_field.text, prix_achat, float(content.prix_vente_field.text), int(content.stock_field.text))
             self.update_product_list()
             self.dialog.dismiss()
         except ValueError:
@@ -619,10 +619,7 @@ class MainApp(MDApp):
         self.dialog.dismiss()
         self.dialog = MDDialog(
             title=f"Supprimer {self.selected_item['nom']}?", text="Cette action est irréversible.",
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SUPPRIMER", on_release=self.delete_product_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="SUPPRIMER", on_release=self.delete_product_action)],
         )
         self.dialog.open()
 
@@ -632,15 +629,11 @@ class MainApp(MDApp):
         self.dialog.dismiss()
 
     def show_add_client_dialog(self):
-        def ok_action(*args):
-            self.add_client_action(content_cls)
+        def ok_action(*args): self.add_client_action(content_cls)
         content_cls = ClientDialogContent(ok_action=ok_action)
         self.dialog = MDDialog(
             title="Ajouter un Client", type="custom", content_cls=content_cls,
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="AJOUTER", on_release=ok_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="AJOUTER", on_release=ok_action)],
         )
         content_cls.on_open()
         self.dialog.on_dismiss = content_cls.on_dismiss
@@ -655,6 +648,7 @@ class MainApp(MDApp):
         self.dialog.dismiss()
 
     def show_client_choice_dialog(self, client, *args):
+        if self.current_user['role'] != 'admin': return
         self.selected_item = client
         self.dialog = MDDialog(
             title=f"Actions pour {client['nom']}",
@@ -668,18 +662,13 @@ class MainApp(MDApp):
 
     def show_edit_client_dialog(self, *args):
         self.dialog.dismiss()
-        def ok_action(*args):
-            self.edit_client_action(content_cls)
+        def ok_action(*args): self.edit_client_action(content_cls)
         content_cls = ClientDialogContent(ok_action=ok_action)
         content_cls.nom_field.text = self.selected_item['nom']
         content_cls.contact_field.text = self.selected_item['contact']
-        
         self.dialog = MDDialog(
             title="Modifier un Client", type="custom", content_cls=content_cls,
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SAUVEGARDER", on_release=ok_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="SAUVEGARDER", on_release=ok_action)],
         )
         content_cls.on_open()
         self.dialog.on_dismiss = content_cls.on_dismiss
@@ -697,10 +686,7 @@ class MainApp(MDApp):
         self.dialog.dismiss()
         self.dialog = MDDialog(
             title=f"Supprimer {self.selected_item['nom']}?", text="Cette action est irréversible.",
-            buttons=[
-                MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()),
-                MDFlatButton(text="SUPPRIMER", on_release=self.delete_client_action),
-            ],
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="SUPPRIMER", on_release=self.delete_client_action)],
         )
         self.dialog.open()
 
@@ -708,6 +694,31 @@ class MainApp(MDApp):
         database.supprimer_client(self.selected_item['id'])
         self.update_client_list()
         self.dialog.dismiss()
+
+    def show_add_user_dialog(self):
+        def ok_action(*args): self.add_user_action(content_cls)
+        content_cls = UserDialogContent(ok_action=ok_action)
+        self.dialog = MDDialog(
+            title="Ajouter un Vendeur", type="custom", content_cls=content_cls,
+            buttons=[MDFlatButton(text="ANNULER", on_release=lambda x: self.dialog.dismiss()), MDFlatButton(text="AJOUTER", on_release=ok_action)],
+        )
+        content_cls.on_open()
+        self.dialog.on_dismiss = content_cls.on_dismiss
+        self.dialog.open()
+
+    def add_user_action(self, content):
+        username = content.username_field.text
+        password = content.password_field.text
+        if not username or not password:
+            toast("Nom d'utilisateur et mot de passe sont requis.")
+            return
+        
+        if database.ajouter_utilisateur(username, password, 'vendeur'):
+            toast(f"Vendeur '{username}' ajouté avec succès.")
+            self.update_user_list()
+            self.dialog.dismiss()
+        else:
+            toast(f"Le nom d'utilisateur '{username}' est déjà pris.")
 
     def show_rate_dialog(self):
         rate_field = MDTextField(text=str(self.taux_usd_vers_fc), hint_text="Taux de change (1 USD pour X Fc)", input_filter="float")
